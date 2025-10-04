@@ -4,31 +4,28 @@ from astropy.io import fits
 from astropy.timeseries import BoxLeastSquares
 import matplotlib.pyplot as plt
 import io
+from PIL import Image
 
+# Функция анализа FITS
 def analyze_fits(fits_file):
-    # Открываем FITS-файл
     with fits.open(fits_file.name) as hdul:
         data = hdul[1].data
         time = data['TIME']
         flux = data['PDCSAP_FLUX']
 
-    # Убираем пустые значения
     mask = ~np.isnan(time) & ~np.isnan(flux)
     time = time[mask]
     flux = flux[mask]
 
-    # Нормализуем поток
     flux = flux / np.median(flux)
 
-    # Применяем Box Least Squares (поиск транзитов)
     bls = BoxLeastSquares(time, flux)
-    periods = np.linspace(0.5, 20, 10000)  # от 0.5 до 20 дней
+    periods = np.linspace(0.5, 20, 10000)
     results = bls.power(periods, 0.05)
 
     best_period = results.period[np.argmax(results.power)]
     power = np.max(results.power)
 
-    # Создаем график
     fig, ax = plt.subplots(2, 1, figsize=(8, 6))
     ax[0].plot(time, flux, color="blue", lw=0.5)
     ax[0].set_title("Кривая блеска (Light Curve)")
@@ -42,28 +39,39 @@ def analyze_fits(fits_file):
     ax[1].set_ylabel("Мощность сигнала")
     ax[1].grid(True)
 
-    # Сохраняем график
     buf = io.BytesIO()
     plt.tight_layout()
-    plt.savefig(buf, format='png')
+    plt.savefig(buf, format='png', facecolor='#0b0c10')  # фон графика как у NASA
     plt.close()
     buf.seek(0)
+    img = Image.open(buf)
 
-    # Простое решение для вывода текста
-    if power > 10:  # если сигнал сильный
+    if power > 10:
         result_text = f"🌍 Обнаружен кандидат в экзопланеты (Период: {best_period:.2f} дней)"
     else:
         result_text = "❌ Экзопланета не обнаружена"
 
-    return result_text, buf
+    return result_text, img
 
-app = gr.Interface(
-    fn=analyze_fits,
-    inputs=gr.File(label="Загрузите FITS-файл (Kepler/TESS)"),
-    outputs=[gr.Textbox(label="Результат"), gr.Image(label="График анализа")],
-    title="AI Exoplanet Detector (Kepler/TESS)",
-    description="ИИ анализирует световую кривую с помощью метода Box Least Squares и определяет, есть ли признаки транзита планеты."
-)
+# Интерфейс в стиле NASA
+with gr.Blocks(css="""
+    body {background-color: #0b0c10; color: #c5c6c7; font-family: Arial, sans-serif;}
+    .gr-button {background-color: #1f2833; color: #66fcf1; border-radius: 8px; border: none; padding: 12px 20px; font-size: 16px;}
+    .gr-button:hover {background-color: #45a29e; color: #0b0c10;}
+    .gr-textbox, .gr-image {background-color: #1f2833; border-radius: 8px; padding: 10px;}
+""") as app:
+
+    gr.Markdown("<h1 style='color:#66fcf1; text-align:center'>🚀 AI Exoplanet Detector</h1>")
+    gr.Markdown("<p style='color:#c5c6c7; text-align:center'>🔭 Загружайте световые кривые Kepler/TESS и ИИ найдёт признаки транзита планеты.</p>")
+
+    with gr.Row():
+        file_input = gr.File(label="Выберите FITS-файл", file_types=['.fits'])
+        result_text = gr.Textbox(label="Результат", interactive=False)
+
+    result_image = gr.Image(label="График анализа")
+    analyze_btn = gr.Button("Анализировать")
+
+    analyze_btn.click(analyze_fits, inputs=file_input, outputs=[result_text, result_image])
 
 app.launch()
 
