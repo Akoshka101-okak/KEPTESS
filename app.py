@@ -27,21 +27,23 @@ def analyze_fits(fits_file):
     power = np.max(results.power)
 
     fig, ax = plt.subplots(2, 1, figsize=(8, 6))
-    ax[0].plot(time, flux, color="blue", lw=0.5)
-    ax[0].set_title("Кривая блеска (Light Curve)")
-    ax[0].set_xlabel("Время (дни)")
-    ax[0].set_ylabel("Яркость (отн.)")
-    ax[0].grid(True)
+    ax[0].plot(time, flux, color="cyan", lw=0.5)
+    ax[0].set_title("Кривая блеска (Light Curve)", color='white')
+    ax[0].set_xlabel("Время (дни)", color='white')
+    ax[0].set_ylabel("Яркость (отн.)", color='white')
+    ax[0].tick_params(colors='white')
+    ax[0].grid(True, color='gray', linestyle='--', alpha=0.5)
 
-    ax[1].plot(results.period, results.power, color="green")
-    ax[1].set_title("Периодограмма BLS")
-    ax[1].set_xlabel("Период (дни)")
-    ax[1].set_ylabel("Мощность сигнала")
-    ax[1].grid(True)
+    ax[1].plot(results.period, results.power, color="lime")
+    ax[1].set_title("Периодограмма BLS", color='white')
+    ax[1].set_xlabel("Период (дни)", color='white')
+    ax[1].set_ylabel("Мощность сигнала", color='white')
+    ax[1].tick_params(colors='white')
+    ax[1].grid(True, color='gray', linestyle='--', alpha=0.5)
 
     buf = io.BytesIO()
     plt.tight_layout()
-    plt.savefig(buf, format='png', facecolor='#0b0c10')  # фон графика как у NASA
+    plt.savefig(buf, format='png', facecolor='#0b0c10')
     plt.close()
     buf.seek(0)
     img = Image.open(buf)
@@ -53,12 +55,32 @@ def analyze_fits(fits_file):
 
     return result_text, img
 
-# Интерфейс в стиле NASA
+# Интерфейс с космическим фоном
 with gr.Blocks(css="""
-    body {background-color: #0b0c10; color: #c5c6c7; font-family: Arial, sans-serif;}
-    .gr-button {background-color: #1f2833; color: #66fcf1; border-radius: 8px; border: none; padding: 12px 20px; font-size: 16px;}
-    .gr-button:hover {background-color: #45a29e; color: #0b0c10;}
-    .gr-textbox, .gr-image {background-color: #1f2833; border-radius: 8px; padding: 10px;}
+    body {
+        background-image: url('https://images.unsplash.com/photo-1532298229144-0ec0c57515c7?ixlib=rb-4.0.3&auto=format&fit=crop&w=1350&q=80');
+        background-size: cover;
+        background-position: center;
+        color: #c5c6c7;
+        font-family: Arial, sans-serif;
+    }
+    .gr-button {
+        background-color: #1f2833;
+        color: #66fcf1;
+        border-radius: 8px;
+        border: none;
+        padding: 12px 20px;
+        font-size: 16px;
+    }
+    .gr-button:hover {
+        background-color: #45a29e;
+        color: #0b0c10;
+    }
+    .gr-textbox, .gr-image {
+        background-color: rgba(31, 40, 51, 0.8);
+        border-radius: 8px;
+        padding: 10px;
+    }
 """) as app:
 
     gr.Markdown("<h1 style='color:#66fcf1; text-align:center'>🚀 AI Exoplanet Detector</h1>")
@@ -75,3 +97,5 @@ with gr.Blocks(css="""
 
 app.launch()
 
+
+   
