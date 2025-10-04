@@ -57,9 +57,44 @@ def analyze_fits(fits_file):
 
 # Интерфейс с космическим фоном
 with gr.Blocks(css="""
-    body {
-        background-image: url('https://images.unsplash.com/photo-1581325785936-3e14a9ef9
+body {
+    background-image: url('https://images.unsplash.com/photo-1581325785936-3e14a9ef9f83?ixlib=rb-4.0.3&auto=format&fit=crop&w=1350&q=80');
+    background-size: cover;
+    background-position: center;
+    color: #c5c6c7;
+    font-family: Arial, sans-serif;
+}
+.gr-button {
+    background-color: #1f2833;
+    color: #66fcf1;
+    border-radius: 8px;
+    border: none;
+    padding: 12px 20px;
+    font-size: 16px;
+}
+.gr-button:hover {
+    background-color: #45a29e;
+    color: #0b0c10;
+}
+.gr-textbox, .gr-image {
+    background-color: rgba(31, 40, 51, 0.8);
+    border-radius: 8px;
+    padding: 10px;
+}
+""") as app:
 
+    gr.Markdown("<h1 style='color:#66fcf1; text-align:center'>🚀 AI Exoplanet Detector</h1>")
+    gr.Markdown("<p style='color:#c5c6c7; text-align:center'>🔭 Загружайте световые кривые Kepler/TESS и ИИ найдёт признаки транзита планеты.</p>")
 
+    with gr.Row():
+        file_input = gr.File(label="Выберите FITS-файл", file_types=['.fits'])
+        result_text = gr.Textbox(label="Результат", interactive=False)
+
+    result_image = gr.Image(label="График анализа")
+    analyze_btn = gr.Button("Анализировать")
+
+    analyze_btn.click(analyze_fits, inputs=file_input, outputs=[result_text, result_image])
+
+app.launch()
 
    
