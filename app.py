@@ -34,12 +34,13 @@ def analyze_fits(fits_file):
     if len(time) < 10:
         return "❌ Недостаточно данных для анализа", None
 
-    # Нормируем
+    # Нормируем и центрируем
     flux = flux / np.median(flux)
+    flux = flux - np.median(flux)
 
     # BLS анализ
     bls = BoxLeastSquares(time, flux)
-    periods = np.linspace(0.5, 30, 20000)  # расширяем диапазон периодов
+    periods = np.linspace(0.5, 50, 20000)  # расширяем диапазон периодов до 50 дней
     results = bls.power(periods, 0.05)
 
     best_period = results.period[np.argmax(results.power)]
@@ -68,8 +69,8 @@ def analyze_fits(fits_file):
     buf.seek(0)
     img = Image.open(buf)
 
-    # Снижаем порог для реальных данных
-    if power > 2.5:  
+    # ------------------ Порог мощности ------------------
+    if power > 1:  
         result_text = f"🌍 Обнаружен кандидат в экзопланеты (Период: {best_period:.2f} дней, Power: {power:.2f})"
     else:
         result_text = f"❌ Экзопланета не обнаружена (Power: {power:.2f})"
@@ -116,5 +117,5 @@ body {
 
     analyze_btn.click(analyze_fits, inputs=file_input, outputs=[result_text, result_image])
 
-# Запуск приложения
+# ------------------ Запуск приложения ------------------
 app.launch()
