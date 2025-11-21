@@ -2,3 +2,6 @@ gradio
 numpy
 astropy
 matplotlib
+scipy
+pillow
+
