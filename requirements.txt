@@ -4,4 +4,4 @@ astropy
 matplotlib
 scipy
 pillow
-
+scikit-learn==1.5.1
