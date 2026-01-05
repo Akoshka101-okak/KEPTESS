@@ -274,7 +274,8 @@ with gr.Blocks(css=css, title="AI Exoplanet Finder v2.0") as demo:
                 file_input = gr.File(file_count="multiple", file_types=[".fits"], label="FITS файлы (Kepler/TESS)")
                 with gr.Column():
                     sde_slider = gr.Slider(6, 12, value=7.5, label="SDE threshold")
-                    period_range = gr.Slider(0.1, 1000, value=[0.3, 500], step=1, label="Period range (days)")
+                    min_period = gr.Slider(0.1, 50, value=0.3, step=0.1, label="Min Period (days)")
+                    max_period = gr.Slider(10, 1000, value=500, step=10, label="Max Period (days)")
             
             analyze_btn = gr.Button("🔬 Запустить AI анализ", variant="primary", size="lg")
             
@@ -282,13 +283,14 @@ with gr.Blocks(css=css, title="AI Exoplanet Finder v2.0") as demo:
                 output_text = gr.Textbox(label="Результаты", lines=12, interactive=False)
                 output_img = gr.Image(label="Графики (LC / BLS / Phase-fold)", type="pil")
     
+    # ✅ Фикс: отдельные inputs БЕЗ *
     analyze_btn.click(
         fn=analyze_fits_pro,
-        inputs=[file_input, sde_slider, *period_range],
+        inputs=[file_input, sde_slider, min_period, max_period],  # ← вот так!
         outputs=[output_text, output_img]
     )
     
-    gr.Markdown("### 📈 **Features**: ML classification • Spline detrend • Multi-FITS stitch • PDF-ready plots")
+    gr.Markdown("### 📈 **Features**: ML classification • Spline detrend • Multi-FITS stitch")
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
