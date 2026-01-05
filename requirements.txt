@@ -5,7 +5,5 @@ matplotlib
 scipy
 pillow
 scikit-learn==1.5.1
-
-io
 PIL
 warnings
