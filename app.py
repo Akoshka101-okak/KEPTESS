@@ -180,4 +180,4 @@ def analyze_fits_pro_corrected(files, sde_thresh, min_p, max_p):
     best_power = power_max[peak_idx]
     sde = compute_sde_relaxed(power_max, peak_idx)
     
-    # ✅ Enha
+    # ✅ Enhaт
