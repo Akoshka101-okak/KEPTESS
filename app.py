@@ -1,4 +1,4 @@
-# EXOPLANET FINDER v3.7 - SINGLE FILES OK + NASA SORT
+# EXOPLANET FINDER v4.0 - AI PLANET CLASSIFIER
 import os
 import numpy as np
 import matplotlib
@@ -9,6 +9,15 @@ import gradio as gr
 import io
 import warnings
 warnings.filterwarnings("ignore")
+
+# 🤖 AI INTEGRATION
+import joblib
+AI_MODEL = None
+try:
+    AI_MODEL = joblib.load('planet_ai.pkl')
+    print('🤖 AI model loaded!')
+except:
+    print('AI model not found - upload planet_ai.pkl')
 
 HAS_ASTROPY = False
 try:
@@ -41,7 +50,7 @@ def read_fits_safe(path):
                 time = h.data[time_col]
                 flux = h.data[flux_col]
                 mask = np.isfinite(time) & np.isfinite(flux)
-                if np.sum(mask) > 20:  # ✅ Минимум 20 точек
+                if np.sum(mask) > 20:
                     return time[mask], flux[mask]
     except:
         pass
@@ -57,23 +66,21 @@ def stitch_nasa_order(files):
             f_norm = (f - med) / np.std(f)
             sort_key = extract_quarter(fname)
             segments.append((t, f_norm, fname, sort_key))
-    
+
     if not segments:
         return None, None
-    
-    # ✅ Сортировка по кварталу (даже для 1 файла)
+
     segments.sort(key=lambda x: x[3])
-    
+
     all_t, all_f = [], []
     prev_end = None
-    
+
     for t_seg, f_seg, fname, _ in segments:
         if prev_end is None:
             all_t.extend(t_seg)
             all_f.extend(f_seg)
             prev_end = t_seg[-1]
         else:
-            # Overlap для множественных
             ov_start = max(t_seg[0], prev_end - 4.0)
             mask = t_seg >= ov_start
             if np.any(mask):
@@ -85,7 +92,7 @@ def stitch_nasa_order(files):
             all_t.extend(t_seg)
             all_f.extend(f_seg)
             prev_end = t_seg[-1]
-    
+
     order = np.argsort(all_t)
     return np.array(all_t)[order], np.array(all_f)[order]
 
@@ -98,25 +105,22 @@ def get_status(conf, n_points):
 def analyze_exoplanet(files, sde_thresh, min_p, max_p):
     if not HAS_ASTROPY or not files:
         return "Error: Astropy missing", None
-    
+
     t_all, f_all = stitch_nasa_order(files)
     if t_all is None:
         return "No valid FITS", None
-    
+
     n_points = len(t_all)
-    
-    # ✅ 20+ точек = OK для любого количества файлов!
     if n_points < 20:
         return f"Too few points: {n_points}", None
-    
+
     baseline = t_all[-1] - t_all[0]
     minp = max(min_p, 0.15)
     maxp = min(max_p, baseline/2)
-    
+
     if maxp < minp:
         return "Period range invalid", None
-    
-    # ✅ Адаптивное количество периодов
+
     if n_points < 1000:
         n_periods = 5000
         periods = np.linspace(minp, maxp, n_periods)
@@ -126,13 +130,13 @@ def analyze_exoplanet(files, sde_thresh, min_p, max_p):
             periods = np.logspace(np.log10(minp), np.log10(maxp), n_periods)
         else:
             periods = np.linspace(minp, maxp, n_periods)
-    
+
     max_dur = minp / 3.0
     durations = np.linspace(0.0008, max_dur, 8)
-    
+
     bls = BoxLeastSquares(t_all, f_all)
     power_max = np.zeros(len(periods))
-    
+
     for d in durations:
         try:
             if d < periods[0]:
@@ -140,16 +144,27 @@ def analyze_exoplanet(files, sde_thresh, min_p, max_p):
                 power_max = np.maximum(power_max, pg.power)
         except:
             continue
-    
+
     peak = np.argmax(power_max)
     sde = (power_max[peak] - np.median(power_max)) / np.std(power_max)
     depth = -np.min(f_all)
     ml_p = min(1.0, sde/10 + depth*2000)
     conf = min(100, sde*8 + ml_p*25 + (n_points-20)/200)
     status = get_status(conf, n_points)
-    
-    result = f'{status}\nScore: {conf:.0f}%\nSDE: {sde:.2f}\nPeriod: {periods[peak]:.4f}d\nDepth: {depth:.5f}\nPoints: {n_points}\nFiles: {len(files)}'
-    
+
+    # 🤖 AI CLASSIFICATION (NEW!)
+    ai_result = ''
+    if AI_MODEL is not None:
+        log_period = np.log10(periods[peak])
+        planet_radius = np.sqrt(depth)  # R_planet при R_star=1
+        ai_features = [[log_period, depth, max_dur, sde, planet_radius]]
+        planet_proba = AI_MODEL.predict_proba(ai_features)[0][1] * 100
+
+        ai_emoji = '🟢' if planet_proba > 80 else '🔴' if planet_proba < 30 else '🟡'
+        ai_result = f"\n🤖 AI: {ai_emoji} {planet_proba:.1f}% планета"
+
+    result = f'{status}\nScore: {conf:.0f}%\nSDE: {sde:.2f}\nPeriod: {periods[peak]:.4f}d\nDepth: {depth:.5f}\nPoints: {n_points}\nFiles: {len(files)}' + ai_result
+
     fig, axs = plt.subplots(3,1, figsize=(12,12), facecolor='black')
     axs[0].plot(t_all, f_all, 'lightblue', alpha=0.7, linewidth=0.8)
     axs[0].set_title(f'Light Curve ({n_points} pts)', color='white')
@@ -170,17 +185,17 @@ def analyze_exoplanet(files, sde_thresh, min_p, max_p):
     img = Image.open(buf)
     return result, img
 
-css = "body {background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%); color: #e8e8ff;} .gr-button {background: linear-gradient(45deg, #00d4ff, #0099cc);}"
+css = "body {{background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%); color: #e8e8ff;}} .gr-button {{background: linear-gradient(45deg, #00d4ff, #0099cc);}}"
 
 with gr.Blocks(css=css) as demo:
-    gr.Markdown('# 🚀 Exoplanet Finder v3.7 - 1..19 FILES OK')
-    gr.Markdown('**Single FITS ✅ Multi FITS ✅ NASA quarters sorting**')
+    gr.Markdown('# 🚀 Exoplanet Finder v4.0 + 🤖 AI Classifier')
+    gr.Markdown('**Upload planet_ai.pkl for AI planet/false positive detection!**')
     file_input = gr.File(file_count="multiple", file_types=[".fits"], label="NASA FITS (1-19 files)")
     sde = gr.Slider(4, 12, 6, label="SDE Threshold")
     minp = gr.Slider(0.1, 20, 0.2, label="Min Period (days)")
     maxp = gr.Slider(20, 1000, 200, label="Max Period (days)")
-    btn = gr.Button("🔍 ANALYZE LC", variant="primary", size="lg")
-    text_out = gr.Textbox(label="Results")
+    btn = gr.Button("🔍 ANALYZE + AI", variant="primary", size="lg")
+    text_out = gr.Textbox(label="BLS + AI Results")
     img_out = gr.Image(label="Plots")
     btn.click(analyze_exoplanet, [file_input, sde, minp, maxp], [text_out, img_out])
 
