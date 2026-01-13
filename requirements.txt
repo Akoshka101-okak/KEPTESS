@@ -1,8 +1,9 @@
-gradio==4.36.1
-numpy==1.26.4
-matplotlib==3.8.4
-pillow==10.2.0
-scipy==1.11.4
-astropy==6.0.0
-scikit-learn==1.5.1
-psutil==5.9.6
+gradio==4.44.0
+numpy
+matplotlib
+pillow
+scipy
+astropy
+scikit-learn
+psutil
+joblib
