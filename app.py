@@ -14,8 +14,8 @@ warnings.filterwarnings("ignore")
 import joblib
 AI_MODEL = None
 try:
-    AI_MODEL = joblib.load('planet_ai_v2.pkl')
-    print('🤖 AI model loaded!')
+    AI_MODEL = joblib.load('planet_ai.pkl')
+    print('AI model loaded!')
 except:
     print('AI model not found - upload planet_ai.pkl')
 
