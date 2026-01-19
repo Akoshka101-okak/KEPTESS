@@ -1,202 +1,301 @@
-# EXOPLANET FINDER v4.0 - AI PLANET CLASSIFIER
+# Exoplanet Finder app.py FIXED - AI_MODEL 6 features + NameError fix
 import os
+import io
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from astropy.io import fits
+from astropy.timeseries import BoxLeastSquares
 from PIL import Image
 import gradio as gr
-import io
-import warnings
-warnings.filterwarnings("ignore")
-
-# 🤖 AI INTEGRATION
 import joblib
-AI_MODEL = None
+
+# Load AI model (handles missing file)
 try:
     AI_MODEL = joblib.load('planet_longquiet.pkl')
-    print('AI model loaded!')
+    print('AI_MODEL loaded OK')
 except:
-    print('AI model not found - upload planet_ai.pkl')
+    AI_MODEL = None
+    print('No AI model - using BLS only')
 
-HAS_ASTROPY = False
+# Savgol filter
 try:
-    from astropy.io import fits
-    from astropy.timeseries import BoxLeastSquares
-    HAS_ASTROPY = True
+    from scipy.signal import savgol_filter
+    HAS_SAVGOL = True
 except:
-    pass
+    HAS_SAVGOL = False
 
-def extract_quarter(fname):
-    parts = fname.split('-')
-    if len(parts) > 1 and len(parts[1]) >= 8:
-        try:
-            year = int(parts[1][:4])
-            doy = int(parts[1][4:7])
-            quarter = ((doy - 1) // 90) + 1
-            return quarter * 10000 + year * 100 + doy
-        except:
-            pass
-    return 0
+def choose_flux_column(colnames):
+    names_up = [c.upper() for c in colnames]
+    for prefer in ('PDCSAP_FLUX', 'SAP_FLUX', 'FLUX'):
+        if prefer in names_up:
+            return colnames[names_up.index(prefer)]
+    return None
 
-def read_fits_safe(path):
+def read_time_flux_from_hdu(hdu):
+    cols = hdu.columns.names
+    flux_col = choose_flux_column(cols)
+    if flux_col is None or 'TIME' not in [c.upper() for c in cols]:
+        return None, None
+    time_name = next((c for c in cols if c.upper() == 'TIME'), None)
+    flux_name = next((c for c in cols if c.upper() == flux_col.upper()), None)
+    time = np.array(hdu.data[time_name], dtype=float)
+    flux = np.array(hdu.data[flux_name], dtype=float)
+    return time, flux
+
+def read_fits_file_auto(path):
     try:
-        with fits.open(path) as hdul:
-            h = hdul[1]
-            cols = h.columns.names
-            flux_col = next((c for c in cols if 'FLUX' in c.upper()), None)
-            time_col = next((c for c in cols if 'TIME' in c.upper()), None)
-            if flux_col and time_col:
-                time = h.data[time_col]
-                flux = h.data[flux_col]
-                mask = np.isfinite(time) & np.isfinite(flux)
-                if np.sum(mask) > 20:
-                    return time[mask], flux[mask]
+        with fits.open(path, memmap=False) as hdul:
+            for h in hdul:
+                if hasattr(h, 'data') and h.data is not None:
+                    t, f = read_time_flux_from_hdu(h)
+                    if t is not None and f is not None:
+                        return t, f
+            try:
+                t, f = read_time_flux_from_hdu(hdul[1])
+                return t, f
+            except:
+                return None, None
     except:
-        pass
-    return None, None
-
-def stitch_nasa_order(files):
-    segments = []
-    for f in files:
-        fname = os.path.basename(f.name)
-        t, f = read_fits_safe(f.name)
-        if t is not None:
-            med = np.median(f)
-            f_norm = (f - med) / np.std(f)
-            sort_key = extract_quarter(fname)
-            segments.append((t, f_norm, fname, sort_key))
-
-    if not segments:
         return None, None
 
-    segments.sort(key=lambda x: x[3])
+def clean_and_normalize_segment(time, flux):
+    mask = np.isfinite(time) & np.isfinite(flux)
+    time = np.array(time[mask], dtype=float)
+    flux = np.array(flux[mask], dtype=float)
+    if len(time) == 0:
+        return None, None
+    order = np.argsort(time)
+    time = time[order]
+    flux = flux[order]
+    med = np.nanmedian(flux)
+    if med == 0 or not np.isfinite(med):
+        med = 1.0
+    flux_norm = flux / med
+    return time, flux_norm
 
-    all_t, all_f = [], []
-    prev_end = None
+def stitch_segments(segments):
+    segs = [(np.nanmedian(t), t, f) for t, f in segments if t is not None and f is not None and len(t) > 0]
+    if len(segs) == 0:
+        return None, None
+    segs.sort(key=lambda x: x[0])
+    aligned = []
+    base_time, base_flux = segs[0][1], segs[0][2]
+    aligned.append((base_time, base_flux))
+    for _, t, f in segs[1:]:
+        overlap_mask_in_new = (t >= aligned[-1][0][0]) & (t <= aligned[-1][0][-1])
+        overlap_mask_in_old = (aligned[-1][0] >= t[0]) & (aligned[-1][0] <= t[-1])
+        if np.any(overlap_mask_in_new) and np.any(overlap_mask_in_old):
+            new_med = np.nanmedian(f[overlap_mask_in_new])
+            old_med = np.nanmedian(aligned[-1][1][overlap_mask_in_old])
+            if np.isfinite(new_med) and np.isfinite(old_med) and old_med != 0:
+                scale = old_med / new_med
+                f = f * scale
+        aligned.append((t, f))
+    time_all = np.concatenate([t for t, f in aligned])
+    flux_all = np.concatenate([f for t, f in aligned])
+    order = np.argsort(time_all)
+    time_all = time_all[order]
+    flux_all = flux_all[order]
+    med_total = np.nanmedian(flux_all)
+    if med_total == 0 or not np.isfinite(med_total):
+        med_total = 1.0
+    flux_all = flux_all / med_total
+    return time_all, flux_all
 
-    for t_seg, f_seg, fname, _ in segments:
-        if prev_end is None:
-            all_t.extend(t_seg)
-            all_f.extend(f_seg)
-            prev_end = t_seg[-1]
-        else:
-            ov_start = max(t_seg[0], prev_end - 4.0)
-            mask = t_seg >= ov_start
-            if np.any(mask):
-                prev_ov = np.array(all_f[-80:])
-                new_ov = f_seg[mask][:80]
-                if len(new_ov) > 10:
-                    scale = np.nanmedian(prev_ov) / np.nanmedian(new_ov)
-                    f_seg = f_seg * np.clip(scale, 0.8, 1.2)
-            all_t.extend(t_seg)
-            all_f.extend(f_seg)
-            prev_end = t_seg[-1]
-
-    order = np.argsort(all_t)
-    return np.array(all_t)[order], np.array(all_f)[order]
-
-def get_status(conf, n_points):
-    if conf > 85: return "🟢 CONFIRMED"
-    elif conf > 65: return "🟡 CANDIDATE"
-    elif n_points > 2000: return "🔵 STRONG"
-    return "⚪ WEAK LC"
-
-def analyze_exoplanet(files, sde_thresh, min_p, max_p):
-    if not HAS_ASTROPY or not files:
-        return "Error: Astropy missing", None
-
-    t_all, f_all = stitch_nasa_order(files)
-    if t_all is None:
-        return "No valid FITS", None
-
-    n_points = len(t_all)
-    if n_points < 20:
-        return f"Too few points: {n_points}", None
-
-    baseline = t_all[-1] - t_all[0]
-    minp = max(min_p, 0.15)
-    maxp = min(max_p, baseline/2)
-
-    if maxp < minp:
-        return "Period range invalid", None
-
-    if n_points < 1000:
-        n_periods = 5000
-        periods = np.linspace(minp, maxp, n_periods)
+def detrend_flux(time, flux):
+    n = len(flux)
+    if n < 10:
+        trend = np.ones_like(flux)
     else:
-        n_periods = 14000
-        if baseline > 80:
-            periods = np.logspace(np.log10(minp), np.log10(maxp), n_periods)
+        if HAS_SAVGOL:
+            win = min(201, max(7, (n // 50) | 1))
+            try:
+                trend = savgol_filter(flux, window_length=win, polyorder=2, mode='interp')
+            except:
+                k = max(3, n // 50)
+                from scipy.ndimage import median_filter
+                trend = median_filter(flux, size=k, mode='nearest')
         else:
-            periods = np.linspace(minp, maxp, n_periods)
+            k = max(3, n // 50)
+            pad = k//2
+            fpad = np.pad(flux, pad_width=pad, mode='edge')
+            trend = np.array([np.median(fpad[i:i+k]) for i in range(len(flux))])
+    mask = np.isfinite(trend) & (np.abs(trend) > 0)
+    if not np.all(mask):
+        fallback = np.nanmedian(trend[mask]) if np.any(mask) else 1.0
+        trend[~mask] = fallback
+    flux_rel = flux / trend - 1.0
+    return flux_rel, trend
 
-    max_dur = minp / 3.0
-    durations = np.linspace(0.0008, max_dur, 8)
+def compute_sde(power, peak_index, exclude_width=50):
+    p = np.array(power, dtype=float)
+    n = len(p)
+    mask = np.ones(n, dtype=bool)
+    lo = max(0, peak_index - exclude_width)
+    hi = min(n, peak_index + exclude_width)
+    mask[lo:hi] = False
+    noise = p[mask]
+    if len(noise) < 10:
+        median = np.median(p)
+        std = np.std(p)
+    else:
+        median = np.median(noise)
+        std = np.std(noise)
+    if std == 0:
+        return 0.0
+    return (p[peak_index] - median) / std
 
-    bls = BoxLeastSquares(t_all, f_all)
-    power_max = np.zeros(len(periods))
+def analyze_exoplanet(file_objs, sde_threshold=7.5, min_period=0.3, max_period_user=None):
+    if not file_objs or len(file_objs) == 0:
+        return 'Upload FITS files.', None
 
-    for d in durations:
-        try:
-            if d < periods[0]:
-                pg = bls.power(periods, d)
-                power_max = np.maximum(power_max, pg.power)
-        except:
+    segments = []
+    failed = []
+    for f in file_objs:
+        t, flux = read_fits_file_auto(f.name)
+        if t is None or flux is None or len(t) == 0:
+            failed.append(os.path.basename(f.name))
             continue
+        t_clean, f_clean = clean_and_normalize_segment(t, flux)
+        if t_clean is None:
+            failed.append(os.path.basename(f.name))
+            continue
+        segments.append((t_clean, f_clean))
 
-    peak = np.argmax(power_max)
-    sde = (power_max[peak] - np.median(power_max)) / np.std(power_max)
-    depth = -np.min(f_all)
-    ml_p = min(1.0, sde/10 + depth*2000)
-    conf = min(100, sde*8 + ml_p*25 + (n_points-20)/200)
-    status = get_status(conf, n_points)
+    if len(segments) == 0:
+        return f'No valid data. Failed: {', '.join(failed)}', None
 
-    # 🤖 AI CLASSIFICATION (NEW!)
-    ai_result = ''
-    if AI_MODEL is not None:
-        log_period = np.log10(periods[peak])
-        planet_radius = np.sqrt(depth)  # R_planet при R_star=1
-        ai_features = [[log_period, depth, max_dur, sde, planet_radius, multi]]
-        planet_proba = AI_MODEL.predict_proba(ai_features)[0][1] * 100
+    time_all, flux_all = stitch_segments(segments)
+    if time_all is None or len(time_all) < 10:
+        return 'Too few points after stitching.', None
 
-        ai_emoji = '🟢' if planet_proba > 80 else '🔴' if planet_proba < 30 else '🟡'
-        ai_result = f"\n🤖 AI: {ai_emoji} {planet_proba:.1f}% планета"
+    mask = np.isfinite(time_all) & np.isfinite(flux_all)
+    time_all = time_all[mask]
+    flux_all = flux_all[mask]
+    if len(time_all) < 10:
+        return 'Too few points after cleaning.', None
 
-    result = f'{status}\nScore: {conf:.0f}%\nSDE: {sde:.2f}\nPeriod: {periods[peak]:.4f}d\nDepth: {depth:.5f}\nPoints: {n_points}\nFiles: {len(files)}' + ai_result
+    flux_rel, trend = detrend_flux(time_all, flux_all)
 
-    fig, axs = plt.subplots(3,1, figsize=(12,12), facecolor='black')
-    axs[0].plot(t_all, f_all, 'lightblue', alpha=0.7, linewidth=0.8)
-    axs[0].set_title(f'Light Curve ({n_points} pts)', color='white')
-    axs[1].semilogx(periods, power_max, 'gold')
-    axs[1].axvline(periods[peak], color='lime', ls='--')
-    axs[1].set_title('BLS Periodogram', color='white')
-    phase = ((t_all - t_all[0])/periods[peak] + 0.5) % 1
-    phase_days = (phase - 0.5) * periods[peak]
-    axs[2].plot(phase_days, f_all, 'lightcoral', alpha=0.7)
-    axs[2].set_title('Phase-folded', color='white')
-    for ax in axs:
-        ax.set_facecolor('#0a0a1a')
-        ax.tick_params(colors='white')
+    total_span = time_all[-1] - time_all[0]
+    if total_span <= 0:
+        return 'Invalid time stamps.', None
+
+    if max_period_user is None:
+        max_period = max(min(500.0, total_span / 2.0), 1.0)
+    else:
+        max_period = min(max_period_user, total_span/2.0)
+
+    n_periods = min(40000, max(3000, int(total_span * 50)))
+    periods = np.linspace(min_period, max_period, n_periods)
+    durations = np.linspace(0.005, 0.2, 12)
+
+    bls = BoxLeastSquares(time_all, flux_rel)
+    power_matrix = np.zeros((len(durations), len(periods)))
+    for i, d in enumerate(durations):
+        res = bls.power(periods, d)
+        power_matrix[i, :] = res.power
+
+    power_per_period = np.max(power_matrix, axis=0)
+    idx_peak = np.argmax(power_per_period)
+    best_period = periods[idx_peak]
+    idx_best_dur = np.argmax(power_matrix[:, idx_peak])
+    best_duration = durations[idx_best_dur]
+    sde = compute_sde(power_per_period, idx_peak)
+    detected = sde >= sde_threshold
+
+    # AI MODEL FEATURES (FIXED 6 features)
+    log_period = np.log10(best_period)
+    depth = np.nanmax(np.abs(flux_rel))
+    duration = best_duration
+    sde_val = sde
+    planet_radius = np.sqrt(depth) * 1.3  # R_earth scale
+    multi = 0  # single system
+
+    ai_features = np.array([[log_period, depth, duration, sde_val, planet_radius, multi]])
+
+    planet_proba = 0
+    if AI_MODEL is not None and hasattr(AI_MODEL, 'predict_proba'):
+        try:
+            planet_proba = AI_MODEL.predict_proba(ai_features)[0][1] * 100
+        except Exception as e:
+            planet_proba = 0
+            print(f'AI error: {e}')
+
+    # Plots (3 panels)
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10))
+
+    # 1. Time series
+    ax1.plot(time_all, flux_rel, '.', markersize=0.5)
+    ax1.set_ylabel('Flux rel')
+    ax1.grid(alpha=0.3)
+
+    # 2. Periodogram
+    noise_mask = np.ones_like(power_per_period, dtype=bool)
+    w = max(1, int(len(periods)*0.002))
+    lo = max(0, idx_peak - w)
+    hi = min(len(periods), idx_peak + w)
+    noise_mask[lo:hi] = False
+    noise_median = np.median(power_per_period[noise_mask])
+    noise_std = np.std(power_per_period[noise_mask])
+    detection_level = noise_median + sde_threshold * noise_std if noise_std > 0 else noise_median
+    ax2.plot(periods, power_per_period, linewidth=0.8)
+    ax2.axvline(best_period, color='red', linestyle='--', label=f'P={best_period:.2f}d')
+    ax2.axhline(detection_level, color='orange', linestyle=':', label=f'SDE={sde:.1f}')
+    ax2.set_xlabel('Period (days)')
+    ax2.set_ylabel('BLS Power')
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+
+    # 3. Phase-folded
+    phase = ((time_all - time_all[0]) / best_period) % 1.0
+    phase = (phase + 0.5) % 1.0
+    order = np.argsort(phase)
+    phase_sorted = phase[order]
+    flux_sorted = flux_rel[order]
+    phase_days = (phase_sorted - 0.5) * best_period
+    ax3.plot(phase_days, flux_sorted, '.', markersize=0.5, alpha=0.6)
+    nbins = 50
+    bins = np.linspace(-0.5*best_period, 0.5*best_period, nbins+1)
+    inds = np.digitize(phase_days, bins) - 1
+    binned = [np.nanmedian(flux_sorted[inds == i]) if np.any(inds==i) else np.nan for i in range(nbins)]
+    ax3.plot(0.5*(bins[:-1]+bins[1:]), binned, 'r-', linewidth=2)
+    ax3.set_xlim(-0.2*best_period, 0.2*best_period)
+    ax3.set_xlabel('Phase (days from transit center)')
+    ax3.set_ylabel('Flux rel')
+    ax3.grid(alpha=0.3)
+
     plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, facecolor='black', dpi=150)
+    plt.savefig(buf, format='png', dpi=150, facecolor='black', edgecolor='none')
     plt.close()
-    img = Image.open(buf)
+    buf.seek(0)
+    img = Image.open(buf).convert('RGB')
+
+    # Result text
+    status = 'DETECTED' if detected else 'NOT CONFIRMED'
+    result = f'''{status} | SDE: {sde:.2f} | P: {best_period:.3f}d
+AI Planet Probability: {planet_proba:.1f}%
+Files OK: {len(segments)}/{len(file_objs)}'''
+
     return result, img
 
-css = "body {{background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 100%); color: #e8e8ff;}} .gr-button {{background: linear-gradient(45deg, #00d4ff, #0099cc);}}"
+css = """
+body { background-color: #0b0c10; color: #c5c6c7; }
+.gr-button { background-color: #1f2833; color: #66fcf1; }
+.gr-button:hover { background-color: #45a29e; }
+.gr-textbox, .gr-image { background-color: rgba(31,40,51,0.95); border-radius: 8px; }
+"""
 
-with gr.Blocks(css=css) as demo:
-    gr.Markdown('# 🚀 Exoplanet Finder v4.0 + 🤖 AI Classifier')
-    gr.Markdown('**Upload planet_ai.pkl for AI planet/false positive detection!**')
-    file_input = gr.File(file_count="multiple", file_types=[".fits"], label="NASA FITS (1-19 files)")
-    sde = gr.Slider(4, 12, 6, label="SDE Threshold")
-    minp = gr.Slider(0.1, 20, 0.2, label="Min Period (days)")
-    maxp = gr.Slider(20, 1000, 200, label="Max Period (days)")
-    btn = gr.Button("🔍 ANALYZE + AI", variant="primary", size="lg")
-    text_out = gr.Textbox(label="BLS + AI Results")
-    img_out = gr.Image(label="Plots")
-    btn.click(analyze_exoplanet, [file_input, sde, minp, maxp], [text_out, img_out])
+with gr.Blocks(css=css) as app:
+    gr.Markdown('# рџљЂ Exoplanet Finder - Kepler/TESS FITS + AI')
+    with gr.Row():
+        file_input = gr.File(file_count='multiple', file_types=['.fits'], label='Upload FITS files')
+    analyze_btn = gr.Button('Analyze', variant='primary')
+    output_text = gr.Textbox(label='Results', lines=5)
+    output_img = gr.Image(label='Lightcurve + Periodogram + Phase-fold')
 
-demo.launch()
+    analyze_btn.click(analyze_exoplanet, inputs=[file_input], outputs=[output_text, output_img])
+
+if __name__ == '__main__':
+    app.launch(server_name='0.0.0.0', server_port=7860)
