@@ -157,7 +157,7 @@ def analyze_exoplanet(files, sde_thresh, min_p, max_p):
     if AI_MODEL is not None:
         log_period = np.log10(periods[peak])
         planet_radius = np.sqrt(depth)  # R_planet при R_star=1
-        ai_features = [[log_period, depth, max_dur, sde, planet_radius]]
+        ai_features = [[log_period, depth, max_dur, sde, planet_radius, multi]]
         planet_proba = AI_MODEL.predict_proba(ai_features)[0][1] * 100
 
         ai_emoji = '🟢' if planet_proba > 80 else '🔴' if planet_proba < 30 else '🟡'
