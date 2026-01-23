@@ -1,4 +1,4 @@
-# ORIGINAL Exoplanet Finder UI + AI comparison (3 graphs + detailed results)
+# Exoplanet Finder - DARK LINES + ORIGINAL 3 plots
 import os
 import io
 import numpy as np
@@ -12,7 +12,6 @@ import joblib
 # AI Model
 try:
     AI_MODEL = joblib.load('planet_longquiet.pkl')
-    print('AI loaded')
 except:
     AI_MODEL = None
 
@@ -21,6 +20,8 @@ try:
     HAS_SAVGOL = True
 except:
     HAS_SAVGOL = False
+
+plt.style.use('dark_background')
 
 def choose_flux_column(colnames):
     names_up = [c.upper() for c in colnames]
@@ -48,11 +49,7 @@ def read_fits_file_auto(path):
                     t, f = read_time_flux_from_hdu(h)
                     if t is not None and f is not None:
                         return t, f
-            try:
-                t, f = read_time_flux_from_hdu(hdul[1])
-                return t, f
-            except:
-                return None, None
+            return read_time_flux_from_hdu(hdul[1]) if len(hdul) > 1 else (None, None)
     except:
         return None, None
 
@@ -63,239 +60,247 @@ def clean_and_normalize_segment(time, flux):
     if len(time) == 0:
         return None, None
     order = np.argsort(time)
-    time = time[order]
-    flux = flux[order]
+    time, flux = time[order], flux[order]
     med = np.nanmedian(flux)
-    if med == 0 or not np.isfinite(med):
-        med = 1.0
-    return time, flux / med
+    return time, flux / (med if np.isfinite(med) and med != 0 else 1.0)
 
 def stitch_segments(segments):
-    segs = [(np.nanmedian(t), t, f) for t, f in segments if t is not None and f is not None and len(t) > 0]
-    if len(segs) == 0:
+    segs = [(np.nanmedian(t), t, f) for t, f in segments if len(t) > 0]
+    if not segs:
         return None, None
     segs.sort(key=lambda x: x[0])
-    aligned = []
-    base_time, base_flux = segs[0][1], segs[0][2]
-    aligned.append((base_time, base_flux))
+    aligned = [(segs[0][1], segs[0][2])]
     for _, t, f in segs[1:]:
-        overlap_mask_in_new = (t >= aligned[-1][0][0]) & (t <= aligned[-1][0][-1])
-        overlap_mask_in_old = (aligned[-1][0] >= t[0]) & (aligned[-1][0] <= t[-1])
-        if np.any(overlap_mask_in_new) and np.any(overlap_mask_in_old):
-            new_med = np.nanmedian(f[overlap_mask_in_new])
-            old_med = np.nanmedian(aligned[-1][1][overlap_mask_in_old])
-            if np.isfinite(new_med) and np.isfinite(old_med) and old_med != 0:
-                f *= old_med / new_med
+        if len(aligned):
+            prev_t, prev_f = aligned[-1]
+            overlap_new = (t >= prev_t[0]) & (t <= prev_t[-1])
+            overlap_old = (prev_t >= t[0]) & (prev_t <= t[-1])
+            if overlap_new.any() and overlap_old.any():
+                scale = np.nanmedian(prev_f[overlap_old]) / np.nanmedian(f[overlap_new])
+                f *= scale if np.isfinite(scale) else 1.0
         aligned.append((t, f))
     time_all = np.concatenate([t for t, f in aligned])
     flux_all = np.concatenate([f for t, f in aligned])
     order = np.argsort(time_all)
-    time_all = time_all[order]
-    flux_all = flux_all[order]
-    med_total = np.nanmedian(flux_all)
-    if med_total == 0 or not np.isfinite(med_total):
-        med_total = 1.0
-    flux_all /= med_total
+    time_all, flux_all = time_all[order], flux_all[order]
+    med = np.nanmedian(flux_all)
+    flux_all /= med if np.isfinite(med) and med != 0 else 1.0
     return time_all, flux_all
 
 def detrend_flux(time, flux):
     n = len(flux)
-    if n < 10:
-        return flux - np.nanmedian(flux), np.ones_like(flux)
-    if HAS_SAVGOL:
-        win = min(201, max(7, (n // 50) | 1))
+    if n < 20:
+        trend = np.ones_like(flux)
+    elif HAS_SAVGOL:
+        win = min(201, max(11, n//30 | 1))
         try:
             trend = savgol_filter(flux, win, 2, mode='interp')
         except:
-            k = max(3, n // 50)
-            from scipy.ndimage import median_filter
-            trend = median_filter(flux, k, mode='nearest')
+            trend = np.ones_like(flux)
     else:
-        k = max(3, n // 50)
-        pad = k//2
-        fpad = np.pad(flux, pad_width=pad, mode='edge')
-        trend = np.array([np.median(fpad[i:i+k]) for i in range(n)])
-    mask = np.isfinite(trend) & (np.abs(trend) > 0)
-    if not np.all(mask):
-        fallback = np.nanmedian(trend[mask]) if np.any(mask) else 1.0
-        trend[~mask] = fallback
+        k = max(5, n//50)
+        from scipy.ndimage import median_filter
+        trend = median_filter(flux, k, mode='nearest')
+    trend = np.nan_to_num(trend, nan=1.0)
     return flux / trend - 1.0, trend
 
-def compute_sde(power, peak_index, exclude_width=50):
+def compute_sde(power, peak_idx, exclude_width=50):
     p = np.array(power, dtype=float)
     n = len(p)
     mask = np.ones(n, dtype=bool)
-    lo = max(0, peak_index - exclude_width)
-    hi = min(n, peak_index + exclude_width)
+    lo, hi = max(0, peak_idx-exclude_width), min(n, peak_idx+exclude_width)
     mask[lo:hi] = False
     noise = p[mask]
-    median = np.median(noise) if len(noise) >= 10 else np.median(p)
-    std = np.std(noise) if len(noise) >= 10 else np.std(p)
-    return (p[peak_index] - median) / std if std > 0 else 0.0
+    med, std = np.median(noise), np.std(noise)
+    return (p[peak_idx] - med) / std if std > 0 else 0.0
 
-def analyze_exoplanet(file_objs, sde_threshold=7.5):
-    if not file_objs:
-        return 'Upload FITS files', None, None
+def analyze_exoplanet(files, sde_thresh=7.5):
+    if not files:
+        return 'Upload FITS', None
 
     segments, failed = [], []
-    for f in file_objs:
+    for f in files:
         t, flux = read_fits_file_auto(f.name)
-        if t is None or flux is None or len(t) == 0:
+        if t is None or len(t) < 10:
             failed.append(os.path.basename(f.name))
             continue
         t_clean, f_clean = clean_and_normalize_segment(t, flux)
-        if t_clean is None:
-            failed.append(os.path.basename(f.name))
-            continue
-        segments.append((t_clean, f_clean))
+        if t_clean is not None:
+            segments.append((t_clean, f_clean))
 
     if not segments:
-        return f'No valid data. Failed: {', '.join(failed)}', None, None
+        return f'No valid data. Failed: {', '.join(failed)}', None
 
     time_all, flux_all = stitch_segments(segments)
     if time_all is None or len(time_all) < 50:
-        return 'Too few points', None, None
+        return 'Too few points after processing', None
 
     mask = np.isfinite(time_all) & np.isfinite(flux_all)
-    time_all = time_all[mask]
-    flux_all = flux_all[mask]
+    time_all, flux_all = time_all[mask], flux_all[mask]
 
-    flux_rel, trend = detrend_flux(time_all, flux_all)
+    flux_rel, _ = detrend_flux(time_all, flux_all)
 
-    total_span = time_all[-1] - time_all[0]
-    max_period = min(500.0, total_span / 2.0)
-    n_periods = min(40000, max(3000, int(total_span * 50)))
-    periods = np.linspace(0.3, max_period, n_periods)
-    durations = np.linspace(0.005, 0.2, 12)
+    span = time_all[-1] - time_all[0]
+    max_p = min(500, span/2)
+    n_p = min(40000, max(5000, int(span*30)))
+    periods = np.linspace(0.3, max_p, n_p)
+    durations = np.linspace(0.005, 0.2, 15)
 
     bls = BoxLeastSquares(time_all, flux_rel)
-    power_matrix = np.zeros((len(durations), len(periods)))
-    for i, d in enumerate(durations):
-        power_matrix[i] = bls.power(periods, d).power
+    power_max = np.max([bls.power(periods, d).power for d in durations], axis=0)
+    peak_idx = np.argmax(power_max)
+    best_p = periods[peak_idx]
+    sde = compute_sde(power_max, peak_idx)
+    detected = sde >= sde_thresh
 
-    power_per_period = np.max(power_matrix, axis=0)
-    idx_peak = np.argmax(power_per_period)
-    best_period = periods[idx_peak]
-    best_duration = durations[np.argmax(power_matrix[:, idx_peak])]
-    sde_val = compute_sde(power_per_period, idx_peak)
-    detected = sde_val >= sde_threshold
-
-    # AI FEATURES (6 exactly)
-    log_period = np.log10(best_period)
+    # AI 6 features
+    log_p = np.log10(best_p)
     depth = np.nanmax(np.abs(flux_rel))
-    duration = best_duration
-    sde = sde_val
-    planet_radius = np.sqrt(depth) * 1.3
+    dur = durations[np.argmax([bls.power(periods, d).power[peak_idx] for d in durations])]
+    ai_sde = sde
+    r_planet = np.sqrt(depth) * 1.3
     multi = 0
 
-    ai_features = np.array([[log_period, depth, duration, sde, planet_radius, multi]])
-    planet_proba = 0
-    if AI_MODEL is not None:
-        try:
-            planet_proba = AI_MODEL.predict_proba(ai_features)[0][1] * 100
-        except:
-            pass
+    ai_feats = np.array([[log_p, depth, dur, ai_sde, r_planet, multi]])
+    ai_prob = AI_MODEL.predict_proba(ai_feats)[0,1]*100 if AI_MODEL is not None else 0
 
-    # ORIGINAL 3 PLOTS
-    fig = plt.figure(figsize=(12, 10), facecolor='black')
+    # DARK 3 PLOTS - LINES NOT DOTS
+    fig = plt.figure(figsize=(14, 12), facecolor='black')
+    gs = fig.add_gridspec(3, 1, hspace=0.3)
 
-    # 1. Time domain
-    ax1 = plt.subplot(3,1,1)
-    ax1.plot(time_all, flux_rel, '.', ms=0.5, color='cyan')
+    # 1. Time series - SMOOTH LINE
+    ax1 = fig.add_subplot(gs[0])
+    from scipy.interpolate import interp1d
+    if len(time_all) > 100:
+        f_interp = interp1d(time_all, flux_rel, kind='cubic', bounds_error=False, fill_value='extrapolate')
+        t_smooth = np.linspace(time_all[0], time_all[-1], 1000)
+        ax1.plot(t_smooth, f_interp(t_smooth), 'cyan', lw=1, alpha=0.9, label='Smoothed')
+    ax1.plot(time_all, flux_rel, 'cyan', lw=0.5, alpha=0.4)
     ax1.set_ylabel('Flux rel')
-    ax1.grid(alpha=0.3)
-    ax1.set_title('Detrended lightcurve')
+    ax1.grid(alpha=0.2, color='gray')
+    ax1.set_title('Detrended Lightcurve', color='white')
 
     # 2. Periodogram
-    ax2 = plt.subplot(3,1,2)
-    ax2.plot(periods, power_per_period, 'm-', lw=0.8)
-    noise_mask = np.ones_like(power_per_period, dtype=bool)
-    w = max(1, int(len(periods)*0.002))
-    lo, hi = max(0, idx_peak-w), min(len(periods), idx_peak+w)
+    ax2 = fig.add_subplot(gs[1])
+    ax2.plot(periods, power_max, 'magenta', lw=1.2)
+    noise_mask = np.ones_like(power_max, dtype=bool)
+    w = max(1, len(periods)//1000)
+    lo, hi = max(0, peak_idx-w), min(len(periods), peak_idx+w)
     noise_mask[lo:hi] = False
-    noise_med = np.median(power_per_period[noise_mask])
-    noise_std = np.std(power_per_period[noise_mask])
-    det_level = noise_med + sde_threshold * noise_std if noise_std > 0 else noise_med
-    ax2.axvline(best_period, color='red', ls='--', lw=2, label=f'P={best_period:.3f}d')
-    ax2.axhline(det_level, color='orange', ls=':', lw=2, label=f'SDE thresh={sde_threshold}')
+    n_med, n_std = np.median(power_max[noise_mask]), np.std(power_max[noise_mask])
+    det_lev = n_med + sde_thresh * n_std
+    ax2.axvline(best_p, color='red', ls='--', lw=2, label=f'Best P={best_p:.3f}d')
+    ax2.axhline(det_lev, color='lime', ls=':', lw=2, label=f'SDE thresh={sde_thresh}')
     ax2.set_ylabel('BLS Power')
-    ax2.legend()
-    ax2.grid(alpha=0.3)
+    ax2.legend(frameon=False)
+    ax2.grid(alpha=0.2)
+    ax2.set_title('Periodogram', color='white')
 
-    # 3. Phase folded
-    ax3 = plt.subplot(3,1,3)
-    phase = ((time_all - time_all[0]) / best_period) % 1
+    # 3. Phase folded - BINNED LINE
+    ax3 = fig.add_subplot(gs[2])
+    phase = ((time_all - time_all[0]) / best_p) % 1
     phase = (phase + 0.5) % 1
     order = np.argsort(phase)
-    phase_days = (phase[order] - 0.5) * best_period
-    flux_sorted = flux_rel[order]
-    ax3.plot(phase_days, flux_sorted, '.', ms=0.5, alpha=0.6, color='cyan')
-    nbins = 50
-    bins = np.linspace(-0.5*best_period, 0.5*best_period, nbins+1)
+    phase_days = (phase[order] - 0.5) * best_p
+    flux_sort = flux_rel[order]
+    ax3.plot(phase_days, flux_sort, 'cyan', lw=0.6, alpha=0.5)
+    # Binned median line
+    nbins = 80
+    bins = np.linspace(-0.5*best_p, 0.5*best_p, nbins+1)
     inds = np.digitize(phase_days, bins) - 1
-    binned = [np.nanmedian(flux_sorted[inds==i]) if np.any(inds==i) else np.nan for i in range(nbins)]
-    ax3.plot(0.5*(bins[:-1]+bins[1:]), binned, 'r-', lw=3)
-    ax3.set_xlim(-0.2*best_period, 0.2*best_period)
-    ax3.set_xlabel('Days from transit center')
+    binned_flux = []
+    bin_centers = 0.5*(bins[:-1] + bins[1:])
+    for i in range(nbins):
+        mask = inds == i
+        binned_flux.append(np.nanmedian(flux_sort[mask]) if mask.any() else np.nan)
+    ax3.plot(bin_centers, binned_flux, 'red', lw=3, label='Binned median')
+    ax3.set_xlim(-0.25*best_p, 0.25*best_p)
+    ax3.set_xlabel('Phase (days from center)')
     ax3.set_ylabel('Flux rel')
-    ax3.grid(alpha=0.3)
-    ax3.set_title(f'Phase folded (P={best_period:.3f}d)')
+    ax3.grid(alpha=0.2)
+    ax3.legend(frameon=False)
+    ax3.set_title(f'Phase Folded (P={best_p:.3f}d)', color='white')
 
     plt.tight_layout()
-    buf1 = io.BytesIO()
-    plt.savefig(buf1, format='png', dpi=150, facecolor='black')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=150, facecolor='black', bbox_inches='tight')
     plt.close()
-    img1 = Image.open(buf1).convert('RGB')
+    img = Image.open(buf).convert('RGB')
 
-    # DETAILED RESULTS TABLE
+    # DETAILED COMPARISON
     status = 'DETECTED' if detected else 'NOT CONFIRMED'
-    result = f'''BLS ALGORITHM:
+    result = f'''BLS CLASSICAL ALGORITHM:
 Status: {status}
-Period: {best_period:.6f} days
-Duration: {best_duration:.4f} fraction
-SDE: {sde_val:.3f} (threshold {sde_threshold})
-Depth: {depth:.6f}
-Files: {len(segments)}/{len(file_objs)} OK
-Span: {total_span:.1f} days
+Period: {best_p:.6f} days  
+Duration frac: {dur:.4f}
+SDE: {sde:.3f} (threshold {sde_thresh})
+Max depth: {depth:.1e}
+Data span: {span:.1f} days
+Files OK: {len(segments)}/{len(files)}
 
-AI MODEL:
-Planet probability: {planet_proba:.1f}%
+🤖 AI NEURAL MODEL:
+Planet probability: {ai_prob:.1f}%
 
-COMPARISON:
-- BLS SDE >7.5 = strong candidate
-- AI >50% = likely planet
-- Both low = probable false positive'''
+COMPARISON TABLE:
+{'='*50}
+| Metric | BLS | AI |
+|--------|-----|----|
+| Signal strength | SDE {sde:.2f} | {ai_prob:.0f}% |
+| Period | {best_p:.1f}d | Same |
+| Verdict | {'STRONG' if sde>10 else 'WEAK' if sde>7.5 else 'NO'} | {'PLANET' if ai_prob>70 else 'CANDIDATE' if ai_prob>30 else 'FP'} |
 
-    return result, img1
+{sde>7.5 and ai_prob>50 and '✅ BOTH AGREE: PLANET CANDIDATE!' or '⚠️ DISAGREE - check data/FPs'}
 
-css = """
-body { background: #0b0c10; color: #c5c6c7; font-family: 'Segoe UI', sans-serif; }
-h1 { color: #66fcf1; text-align: center; }
-.gr-button { background: #1f2833; color: #66fcf1; border-radius: 8px; }
-.gr-button:hover { background: #45a29e; }
-.gr-textbox { background: rgba(31,40,51,0.95); border-radius: 8px; }
-.gr-image { background: rgba(31,40,51,0.8); border-radius: 8px; }
-"""
+KOI-like score: {min(100, (sde/15 + ai_prob/2)/2):.0f}%
+'''
 
-with gr.Blocks(css=css, title='Exoplanet Finder - BLS vs AI') as app:
-    gr.Markdown('# 🚀 Exoplanet Finder - BLS Algorithm vs AI Model')
-    gr.Markdown('Upload Kepler/TESS FITS files. Compare **BLS SDE** (classical) vs **AI probability** side-by-side.')
+    return result, img
+
+css = '''
+body { 
+  background: linear-gradient(135deg, #0b0c10 0%, #1a1a2e 50%, #16213e 100%); 
+  color: #c5c6c7; 
+  font-family: 'Segoe UI', sans-serif; 
+}
+h1 { color: #66fcf1; text-align: center; text-shadow: 0 0 10px #66fcf1; }
+.gr-button { 
+  background: linear-gradient(45deg, #1f2833, #45a29e); 
+  color: #66fcf1; 
+  border-radius: 12px; 
+  border: none;
+  font-weight: bold;
+}
+.gr-button:hover { background: linear-gradient(45deg, #45a29e, #66fcf1); color: #0b0c10; }
+.gr-textbox { 
+  background: rgba(31,40,51,0.9); 
+  border-radius: 12px; 
+  border: 1px solid #66fcf1; 
+  color: #c5c6c7;
+}
+.gr-image { 
+  background: rgba(31,40,51,0.8); 
+  border-radius: 12px; 
+  border: 2px solid #66fcf1; 
+}
+'''
+
+with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
+    gr.Markdown('''
+# Exoplanet Finder - Dark Lines + AI Comparison
+**Upload Kepler/TESS FITS** → **BLS algorithm + Neural AI** → **3 smooth plots**
+    ''')
 
     with gr.Row():
-        file_input = gr.File(file_count='multiple', file_types=['.fits'], label='FITS files (multiple OK)')
+        file_input = gr.File(file_count='multiple', file_types=['.fits'], label='FITS files (multi-OK)')
+        sde_input = gr.Slider(5, 15, value=7.5, step=0.1, label='SDE threshold')
 
-    sde_slider = gr.Slider(5.0, 12.0, value=7.5, step=0.1, label='SDE threshold')
+    analyze_btn = gr.Button('Analyze + AI Predict', variant='primary', size='lg')
 
-    analyze_btn = gr.Button('🔍 Analyze + AI Prediction', variant='primary', size='lg')
+    with gr.Row():
+        output_text = gr.Textbox(label='BLS vs AI Detailed Comparison', lines=15)
+        output_plots = gr.Image(label='Dark Smooth Lines: Time | Periodogram | Phase', type='pil')
 
-    output_text = gr.Textbox(label='Detailed Results (BLS vs AI)', lines=12, max_lines=15)
-    output_graphs = gr.Image(label='3 Plots: Time | Periodogram | Phase-folded', type='pil')
-
-    analyze_btn.click(
-        analyze_exoplanet, 
-        inputs=[file_input, sde_slider], 
-        outputs=[output_text, output_graphs]
-    )
+    analyze_btn.click(analyze_exoplanet, inputs=[file_input, sde_input], outputs=[output_text, output_plots])
 
 if __name__ == '__main__':
-    app.launch(server_name='0.0.0.0', server_port=7860, share=True)
+    app.launch(server_name='0.0.0.0', server_port=7860)
