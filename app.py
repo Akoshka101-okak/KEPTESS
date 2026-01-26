@@ -339,11 +339,11 @@ with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
     analyze_btn.click(analyze_exoplanet, inputs=[file_input, sde_input], outputs=[output_text, output_plots])
 
     with gr.Row():
-    help_btn = gr.Button("? СПРАВКА", variant="secondary")
-    term_dropdown = gr.Dropdown(
-        choices=list(terms.keys()), 
-        label="Выберите термин", 
-        value=None
+        help_btn = gr.Button("? СПРАВКА", variant="secondary")
+        term_dropdown = gr.Dropdown(
+            choices=list(terms.keys()), 
+            label="Выберите термин", 
+            value=None
     )
     search_input = gr.Textbox(label="Поиск термина", placeholder="SDE, BLS, depth...")
 
