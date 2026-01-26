@@ -1,4 +1,3 @@
-# Exoplanet Finder - DARK LINES + ORIGINAL 3 plots
 import os
 import io
 import numpy as np
@@ -9,7 +8,7 @@ from PIL import Image
 import gradio as gr
 import joblib
 
-# AI Model
+# ии модель
 try:
     AI_MODEL = joblib.load('planet_longquiet.pkl')
 except:
@@ -153,7 +152,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     sde = compute_sde(power_max, peak_idx)
     detected = sde >= sde_thresh
 
-    # AI 6 features
+    # 6 параметров
     log_p = np.log10(best_p)
     depth = np.nanmax(np.abs(flux_rel))
     dur = durations[np.argmax([bls.power(periods, d).power[peak_idx] for d in durations])]
@@ -180,7 +179,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     ax1.grid(alpha=0.2, color='gray')
     ax1.set_title('Detrended Lightcurve', color='white')
 
-    # 2. Periodogram
+    # 2. периодограмма
     ax2 = fig.add_subplot(gs[1])
     ax2.plot(periods, power_max, 'magenta', lw=1.2)
     noise_mask = np.ones_like(power_max, dtype=bool)
@@ -196,7 +195,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     ax2.grid(alpha=0.2)
     ax2.set_title('Periodogram', color='white')
 
-    # 3. Phase folded - BINNED LINE
+    # 3. фазы
     ax3 = fig.add_subplot(gs[2])
     phase = ((time_all - time_all[0]) / best_p) % 1
     phase = (phase + 0.5) % 1
@@ -204,7 +203,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     phase_days = (phase[order] - 0.5) * best_p
     flux_sort = flux_rel[order]
     ax3.plot(phase_days, flux_sort, 'cyan', lw=0.6, alpha=0.5)
-    # Binned median line
+    # линия медиана
     nbins = 80
     bins = np.linspace(-0.5*best_p, 0.5*best_p, nbins+1)
     inds = np.digitize(phase_days, bins) - 1
@@ -227,7 +226,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     plt.close()
     img = Image.open(buf).convert('RGB')
 
-    # DETAILED COMPARISON
+    # детальное сравнение
     status = 'DETECTED' if detected else 'NOT CONFIRMED'
     result = f'''BLS CLASSICAL ALGORITHM:
 Status: {status}
@@ -238,7 +237,7 @@ Max depth: {depth:.1e}
 Data span: {span:.1f} days
 Files OK: {len(segments)}/{len(files)}
 
-🤖 AI NEURAL MODEL:
+AI MODEL:
 Planet probability: {ai_prob:.1f}%
 
 COMPARISON TABLE:
@@ -249,7 +248,7 @@ COMPARISON TABLE:
 | Period | {best_p:.1f}d | Same |
 | Verdict | {'STRONG' if sde>10 else 'WEAK' if sde>7.5 else 'NO'} | {'PLANET' if ai_prob>70 else 'CANDIDATE' if ai_prob>30 else 'FP'} |
 
-{sde>7.5 and ai_prob>50 and '✅ BOTH AGREE: PLANET CANDIDATE!' or '⚠️ DISAGREE - check data/FPs'}
+{sde>7.5 and ai_prob>50 and 'BOTH AGREE: PLANET CANDIDATE!' or 'DISAGREE - check data/FPs'}
 
 KOI-like score: {min(100, (sde/15 + ai_prob/2)/2):.0f}%
 '''
@@ -284,10 +283,47 @@ h1 { color: #66fcf1; text-align: center; text-shadow: 0 0 10px #66fcf1; }
 }
 '''
 
+
+terms = {
+    "SDE": "Signal Detection Efficiency. Сила BLS сигнала. >7.5 = сильный кандидат, >15 = отличный сигнал",
+    "BLS": "Box Least Squares. Оптимальный алгоритм поиска периодических транзитов по методу наименьших квадратов",
+    "PDCSAP_FLUX": "Pipeline Pre-search Data Conditioning Simple Aperture Flux. Очищенный pipeline flux (РЕКОМЕНДУЕТСЯ)",
+    "SAP_FLUX": "Simple Aperture Flux. Сырой flux без детренда и коррекций",
+    "LLC": "Long Cadence Lightcurve. 30-мин кадры (~9000 точек/квартал)",
+    "SLC": "Short Cadence Lightcurve. 1-мин кадры (~250k точек/квартал, высокая точность)",
+    "log_period": "Логарифм периода log10(P). Нормализация для ML модели",
+    "depth": "Глубина транзита ΔF/F. Типично 0.001-0.01 для планет",
+    "AI Probability": "Нейросеть вероятность планеты (0-100%). Обучена на 18k KOI",
+    "multi": "Флаг мультипланетной системы (0=single, 1=multi)",
+    "KOI": "Kepler Object of Interest. Кандидат из каталога NASA (9564 цели)",
+    "koi_disposition": "NASA статус: CANDIDATE/CONFIRMED/FALSE POSITIVE",
+    "planet_radius": "Радиус планеты R⊕ (оценка по sqrt(depth))",
+    "phase folded": "Фазовая кривая. Сложены все транзиты по фазе"
+}
+
+def search_term(query):
+    """Поиск термина"""
+    query = query.lower().strip()
+    if not query:
+        return "Введите термин для поиска..."
+
+    results = []
+    for term, desc in terms.items():
+        if query in term.lower() or query in desc.lower():
+            results.append(f"**{term}**: {desc}")
+
+    if results:
+        return "\n---\n".join(results[:10])
+    return f'"{query}" не найден. Попробуйте: SDE, BLS, PDCSAP_FLUX, LLC, SLC, KOI'
+
+def show_term(term):
+    """Показать конкретный термин"""
+    return f"**{term}**: {terms.get(term, 'Термин не найден')}"
+
 with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
     gr.Markdown('''
-# Exoplanet Finder - Dark Lines + AI Comparison
-**Upload Kepler/TESS FITS** → **BLS algorithm + Neural AI** → **3 smooth plots**
+# AI Exoplanet Finder
+**Upload Kepler/TESS FITS** → **BLS algorithm + AI** → **3 smooth plots**
     ''')
 
     with gr.Row():
@@ -301,6 +337,22 @@ with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
         output_plots = gr.Image(label='Dark Smooth Lines: Time | Periodogram | Phase', type='pil')
 
     analyze_btn.click(analyze_exoplanet, inputs=[file_input, sde_input], outputs=[output_text, output_plots])
+
+    with gr.Row():
+    help_btn = gr.Button("? СПРАВКА", variant="secondary")
+    term_dropdown = gr.Dropdown(
+        choices=list(terms.keys()), 
+        label="Выберите термин", 
+        value=None
+    )
+    search_input = gr.Textbox(label="Поиск термина", placeholder="SDE, BLS, depth...")
+
+    with gr.Row():
+        term_output = gr.Markdown(label="Описание")
+
+    help_btn.click(lambda: gr.update(visible=True), outputs=[term_dropdown, search_input, term_output])
+    term_dropdown.change(show_term, inputs=term_dropdown, outputs=term_output)
+    search_input.submit(search_term, inputs=search_input, outputs=term_output)
 
 if __name__ == '__main__':
     app.launch(server_name='0.0.0.0', server_port=7860)
