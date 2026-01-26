@@ -285,40 +285,28 @@ h1 { color: #66fcf1; text-align: center; text-shadow: 0 0 10px #66fcf1; }
 
 
 terms = {
-    "SDE": "Signal Detection Efficiency. Сила BLS сигнала. >7.5 = сильный кандидат, >15 = отличный сигнал",
-    "BLS": "Box Least Squares. Оптимальный алгоритм поиска периодических транзитов по методу наименьших квадратов",
-    "PDCSAP_FLUX": "Pipeline Pre-search Data Conditioning Simple Aperture Flux. Очищенный pipeline flux (РЕКОМЕНДУЕТСЯ)",
-    "SAP_FLUX": "Simple Aperture Flux. Сырой flux без детренда и коррекций",
-    "LLC": "Long Cadence Lightcurve. 30-мин кадры (~9000 точек/квартал)",
-    "SLC": "Short Cadence Lightcurve. 1-мин кадры (~250k точек/квартал, высокая точность)",
-    "log_period": "Логарифм периода log10(P). Нормализация для ML модели",
-    "depth": "Глубина транзита ΔF/F. Типично 0.001-0.01 для планет",
-    "AI Probability": "Нейросеть вероятность планеты (0-100%). Обучена на 18k KOI",
-    "multi": "Флаг мультипланетной системы (0=single, 1=multi)",
-    "KOI": "Kepler Object of Interest. Кандидат из каталога NASA (9564 цели)",
-    "koi_disposition": "NASA статус: CANDIDATE/CONFIRMED/FALSE POSITIVE",
-    "planet_radius": "Радиус планеты R⊕ (оценка по sqrt(depth))",
-    "phase folded": "Фазовая кривая. Сложены все транзиты по фазе"
+    "SDE": "Signal Detection Efficiency. Сила BLS сигнала. >7.5=сильный, >15=отличный",
+    "BLS": "Box Least Squares. Поиск транзитов методом наименьших квадратов",
+    "PDCSAP_FLUX": "Pipeline flux. Очищенный (РЕКОМЕНДУЕТСЯ)",
+    "SAP_FLUX": "Simple Aperture. Сырой flux",
+    "LLC": "Long Cadence. 30мин кадры (~9k/квартал)",
+    "SLC": "Short Cadence. 1мин кадры (~250k/квартал)",
+    "log_period": "log10(Period). Нормализация для ML",
+    "depth": "Глубина транзита ΔF/F (0.001-0.01 планеты)",
+    "AI Probability": "Нейросеть P(планета). >70%=CONFIRMED",
+    "KOI": "Kepler Object of Interest. NASA каталог (9564)",
+    "phase folded": "Фазовая кривая. Сложение транзитов по фазе"
 }
 
 def search_term(query):
-    """Поиск термина"""
-    query = query.lower().strip()
-    if not query:
-        return "Введите термин для поиска..."
-
-    results = []
-    for term, desc in terms.items():
-        if query in term.lower() or query in desc.lower():
-            results.append(f"**{term}**: {desc}")
-
-    if results:
-        return "\n---\n".join(results[:10])
-    return f'"{query}" не найден. Попробуйте: SDE, BLS, PDCSAP_FLUX, LLC, SLC, KOI'
+    q = query.lower()
+    results = [f"**{k}**: {v}" for k,v in terms.items() if q in k.lower() or q in v.lower()]
+    return "\n".join(results[:8]) if results else "Термин не найден"
 
 def show_term(term):
-    """Показать конкретный термин"""
-    return f"**{term}**: {terms.get(term, 'Термин не найден')}"
+    return f"**{term}**: {terms.get(term, 'Не найдено')}"
+
+# В with gr.Blocks() ДОБАВЬ в КОНЕЦ:
 
 with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
     gr.Markdown('''
@@ -338,17 +326,11 @@ with gr.Blocks(css=css, title='Exoplanet Finder - Dark Lines Edition') as app:
 
     analyze_btn.click(analyze_exoplanet, inputs=[file_input, sde_input], outputs=[output_text, output_plots])
 
-    with gr.Row():
-        help_btn = gr.Button("? СПРАВКА", variant="secondary")
-        term_dropdown = gr.Dropdown(
-            choices=list(terms.keys()), 
-            label="Выберите термин", 
-            value=None
-    )
-    search_input = gr.Textbox(label="Поиск термина", placeholder="SDE, BLS, depth...")
-
-    with gr.Row():
-        term_output = gr.Markdown(label="Описание")
+    with gr.Accordion("📚 СПРАВКА / Термины", open=False):
+        with gr.Row():
+            gr.Dropdown(choices=list(terms.keys()), label="Выбрать термин", value="SDE", interactive=True)
+            gr.Textbox(placeholder="Или поиск...", label="🔍 Поиск", lines=1)
+            gr.Markdown("**SDE**: Signal Detection Efficiency...")  # placeholder
 
     help_btn.click(lambda: gr.update(visible=True), outputs=[term_dropdown, search_input, term_output])
     term_dropdown.change(show_term, inputs=term_dropdown, outputs=term_output)
