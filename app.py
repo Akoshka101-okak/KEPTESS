@@ -267,11 +267,11 @@ def show_term(term):
 with gr.Blocks(css=css) as app:
     gr.Markdown('# 🌌 Exoplanet Finder - Dark Lines + AI')
 
-    with gr.Row():
+    with gr.Column():
         files = gr.File(file_count='multiple', file_types=['.fits'], label='FITS files (multi-OK)')
         sde_slider = gr.Slider(5, 15, 7.5, step=0.1, label='SDE threshold')
 
-    analyze_btn = gr.Button('🔍 Analyze + AI Predict', variant='primary', size='lg')
+    analyze_btn = gr.Button('Analyze + AI Predict', variant='primary', size='lg')
 
     with gr.Row():
         result_text = gr.Textbox(label='BLS vs AI Comparison', lines=15)
@@ -279,8 +279,8 @@ with gr.Blocks(css=css) as app:
 
     analyze_btn.click(analyze_exoplanet, [files, sde_slider], [result_text, result_img])
 
-    # DROPDOWN SPRAVKA ACCORDION
-    with gr.Accordion("📚 СПРАВКА (Выберите термин)", open=False):
+    # spravka
+    with gr.Accordion("? СПРАВКА (Выберите термин)", open=False):
         with gr.Row():
             term_dropdown = gr.Dropdown(
                 choices=list(terms.keys()), 
@@ -289,13 +289,13 @@ with gr.Blocks(css=css) as app:
                 elem_id="term_select"
             )
             search_box = gr.Textbox(
-                label="🔍 Поиск", 
+                label="Поиск", 
                 placeholder="SDE, BLS, depth...",
                 lines=1
             )
         help_output = gr.Markdown(label="Описание", value="**SDE**: Signal Detection Efficiency...")
 
-        # DROPDOWN + SEARCH
+        # query
         term_dropdown.change(show_term, term_dropdown, help_output)
         search_box.submit(lambda q: show_term(next((k for k in terms if q.lower() in k.lower()), 'SDE')), search_box, help_output)
 
