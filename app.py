@@ -267,7 +267,7 @@ with gr.Blocks(css=css) as app:
     gr.Markdown('# KEPTESS - Exoplanet Finder AI')
 
     with gr.Column():
-        files = gr.File(file_count='multiple', file_types=['.fits'], label='FITS files (multi-OK)')
+        files = gr.File(file_count='multiple', file_types=['.fits'], label='Multiple or one FITS')
         sde_slider = gr.Slider(5, 15, 7.5, step=0.1, label='SDE threshold')
 
     analyze_btn = gr.Button('Analyze + AI Predict', variant='primary', size='lg')
