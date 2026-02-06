@@ -185,8 +185,8 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     n_med = np.median(power_max[noise_mask])
     n_std = np.std(power_max[noise_mask])
     det_lev = n_med + sde_thresh * n_std
-    ax2.axvline(best_p, 'r--', lw=3, label=f'P={best_p:.3f}d')
-    ax2.axhline(det_lev, 'lime:', lw=2,label=f'SDE={sde_thresh}')
+    ax2.axvline(x=best_p, color='red', ls='--', lw=3, label=f'P={best_p:.3f}d')
+    ax2.axhline(y=det_lev, color='lime', ls=':', lw=2,label=f'SDE={sde_thresh}')
     ax2.set_ylabel('Power')
     ax2.legend()
     ax2.grid(alpha=0.2)
