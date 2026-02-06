@@ -13,18 +13,17 @@ try:
     AI_MODEL = joblib.load('planet_longquiet.pkl')
 except:
     AI_MODEL = None
-
 try:
     from scipy.signal import savgol_filter
-    HAS_SAVGOL = True
+    HAS_SAVGOL =True
 except:
-    HAS_SAVGOL = False
+    HAS_SAVGOL= False
 
 plt.style.use('dark_background')
 
 def choose_flux_column(colnames):
     names_up = [c.upper() for c in colnames]
-    for prefer in ('PDCSAP_FLUX', 'SAP_FLUX', 'FLUX'):
+    for prefer in ('PDCSAP_FLUX','SAP_FLUX','FLUX'):
         if prefer in names_up:
             return colnames[names_up.index(prefer)]
     return None
@@ -33,21 +32,21 @@ def read_time_flux_from_hdu(hdu):
     cols = hdu.columns.names
     flux_col = choose_flux_column(cols)
     if flux_col is None or 'TIME' not in [c.upper() for c in cols]:
-        return None, None
-    time_name = next((c for c in cols if c.upper() == 'TIME'), None)
-    flux_name = next((c for c in cols if c.upper() == flux_col.upper()), None)
+        return None,None
+    time_name = next((c for c in cols if c.upper()=='TIME'), None)
+    flux_name = next((c for c in cols if c.upper()==flux_col.upper()), None)
     time = np.array(hdu.data[time_name], dtype=float)
     flux = np.array(hdu.data[flux_name], dtype=float)
     return time, flux
 
 def read_fits_file_auto(path):
     try:
-        with fits.open(path, memmap=False) as hdul:
+        with fits.open(path,memmap=False) as hdul:
             for h in hdul:
                 if hasattr(h, 'data') and h.data is not None:
-                    t, f = read_time_flux_from_hdu(h)
+                    t,f = read_time_flux_from_hdu(h)
                     if t is not None and f is not None:
-                        return t, f
+                        return t,f
             return read_time_flux_from_hdu(hdul[1]) if len(hdul) > 1 else (None, None)
     except:
         return None, None
@@ -64,7 +63,7 @@ def clean_and_normalize_segment(time, flux):
     return time, flux / (med if np.isfinite(med) and med != 0 else 1.0)
 
 def stitch_segments(segments):
-    segs = [(np.nanmedian(t), t, f) for t, f in segments if len(t) > 0]
+    segs = [(np.nanmedian(t), t, f) for t,f in segments if len(t) > 0]
     if not segs:
         return None, None
     segs.sort(key=lambda x: x[0])
@@ -73,7 +72,7 @@ def stitch_segments(segments):
         if len(aligned):
             prev_t, prev_f = aligned[-1]
             overlap_new = (t >= prev_t[0]) & (t <= prev_t[-1])
-            overlap_old = (prev_t >= t[0]) & (prev_t <= t[-1])
+            overlap_old = (prev_t>= t[0]) & (prev_t <= t[-1])
             if overlap_new.any() and overlap_old.any():
                 scale = np.nanmedian(prev_f[overlap_old]) / np.nanmedian(f[overlap_new])
                 f *= scale if np.isfinite(scale) else 1.0
@@ -152,7 +151,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     sde = compute_sde(power_max, peak_idx)
     detected = sde >= sde_thresh
 
-    # AI
+    # ии анализ
     log_p = np.log10(best_p)
     depth = np.nanmax(np.abs(flux_rel))
     dur = durations[np.argmax([bls.power(periods, d).power[peak_idx] for d in durations])]
@@ -162,7 +161,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     ai_feats = np.array([[log_p, depth, dur, ai_sde, r_planet, multi]])
     ai_prob = AI_MODEL.predict_proba(ai_feats)[0,1]*100 if AI_MODEL is not None else 0
 
-    # PLOTS
+    # графики 3
     fig = plt.figure(figsize=(14, 12), facecolor='black')
     gs = fig.add_gridspec(3, 1, hspace=0.3)
 
@@ -178,23 +177,23 @@ def analyze_exoplanet(files, sde_thresh=7.5):
     ax1.set_title('Lightcurve', color='white')
 
     ax2 = fig.add_subplot(gs[1])
-    ax2.plot(periods, power_max, 'magenta', lw=1.5)
+    ax2.plot(periods, power_max,'magenta', lw=1.5)
     w = max(1, len(periods)//1000)
     lo, hi = max(0, peak_idx-w), min(len(periods), peak_idx+w)
     noise_mask = np.ones_like(power_max, dtype=bool)
-    noise_mask[lo:hi] = False
+    noise_mask[lo:hi] =False
     n_med = np.median(power_max[noise_mask])
     n_std = np.std(power_max[noise_mask])
     det_lev = n_med + sde_thresh * n_std
     ax2.axvline(best_p, 'r--', lw=3, label=f'P={best_p:.3f}d')
-    ax2.axhline(det_lev, 'lime:', lw=2, label=f'SDE={sde_thresh}')
+    ax2.axhline(det_lev, 'lime:', lw=2,label=f'SDE={sde_thresh}')
     ax2.set_ylabel('Power')
     ax2.legend()
     ax2.grid(alpha=0.2)
     ax2.set_title('Periodogram', color='white')
 
     ax3 = fig.add_subplot(gs[2])
-    phase = ((time_all - time_all[0]) / best_p) % 1
+    phase = ((time_all - time_all[0])/ best_p) % 1
     phase = (phase + 0.5) % 1
     order = np.argsort(phase)
     phase_days = (phase[order] - 0.5) * best_p
@@ -214,7 +213,7 @@ def analyze_exoplanet(files, sde_thresh=7.5):
 
     plt.tight_layout()
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', dpi=150, facecolor='black', bbox_inches='tight')
+    plt.savefig(buf, format='png',dpi=150, facecolor='black', bbox_inches='tight')
     plt.close()
     img = Image.open(buf).convert('RGB')
 
@@ -234,38 +233,38 @@ AI: {ai_prob:.1f}% planet
 
 KOI-score: {min(100, (sde/15 + ai_prob/2)/2):.0f}%'''
 
-    return result, img
+    return result,img
 
 css = '''
-body { background: linear-gradient(135deg, #0b0c10 0%, #1a1a2e 50%, #16213e 100%); color: #c5c6c7; font-family: 'Segoe UI', sans-serif; }
-h1 { color: #66fcf1; text-align: center; }
+body { background:linear-gradient(135deg, #0b0c10 0%, #1a1a2e 50%, #16213e 100%); color: #c5c6c7; font-family: 'Segoe UI', sans-serif; }
+h1 { color: #66fcf1;text-align: center; }
 .gr-button { background: linear-gradient(45deg, #1f2833, #45a29e); color: #66fcf1; border-radius: 12px; font-weight: bold; }
-.gr-button:hover { background: linear-gradient(45deg, #45a29e, #66fcf1); color: #0b0c10; }
+.gr-button:hover { background:linear-gradient(45deg, #45a29e, #66fcf1); color: #0b0c10; }
 .gr-textbox { background: rgba(31,40,51,0.9); border-radius: 12px; border: 1px solid #66fcf1; color: #c5c6c7; }
 .gr-image { background: rgba(31,40,51,0.8); border-radius: 12px; border: 2px solid #66fcf1; }
 .gr-dropdown { background: rgba(31,40,51,0.9); border-radius: 12px; border: 1px solid #66fcf1; color: #c5c6c7; }
 '''
 
-# DROPDOWN SPRAVKA
+# dropdown
 terms = {
-    "SDE": "Signal Detection Efficiency. Сила BLS сигнала. >7.5=сильный, >15=отличный",
-    "BLS": "Box Least Squares. Поиск транзитов методом наименьших квадратов",
-    "PDCSAP_FLUX": "Pipeline flux. Очищенный (РЕКОМЕНДУЕТСЯ)",
-    "SAP_FLUX": "Simple Aperture. Сырой flux",
-    "LLC": "Long Cadence. 30мин (~9k точек/квартал)",
-    "SLC": "Short Cadence. 1мин (~250k точек/квартал)",
-    "log_period": "log10(Period) для ML нормализации",
-    "depth": "Глубина транзита ΔF/F",
-    "AI Probability": "Нейросеть вероятность планеты >70%=CONFIRMED",
-    "KOI": "Kepler Object of Interest. NASA каталог (9564)",
-    "phase folded": "Фазовая кривая. Сложение транзитов"
+    "SDE": "Signal Detection Efficiency. If BLS signal power >7.5=strong, >15=excellent",
+    "BLS": "Box Least Squares. Search for small box-shaped transits ",
+    "PDCSAP_FLUX": "Pipeline flux that was cleaned with the PDC filter, recommended for use",
+    "SAP_FLUX": "Simple Aperture or raw flux",
+    "LLC": "Long Cadence. 30min (~9k dots/quarter)",
+    "SLC": "Short Cadence. 1min (~250k dots/quarter)",
+    "log_period": "log10(Period) for ML normalization",
+    "depth": "Transit depth ΔF/F",
+    "AI Probability": "AI probability of being an exoplanet. If >70%=Confirmed",
+    "KOI": "Kepler Object of Interest. NASA catalogue out of 9564 objects",
+    "phase folded": "Phase curve and transit folding for analyzing periodic astronomical events"
 }
 
 def show_term(term):
-    return f"**{term}**: {terms.get(term, 'Термин не найден')}"
+    return f"**{term}**: {terms.get(term, 'Not found')}"
 
 with gr.Blocks(css=css) as app:
-    gr.Markdown('# 🌌 Exoplanet Finder - Dark Lines + AI')
+    gr.Markdown('# KEPTESS - Exoplanet Finder AI')
 
     with gr.Column():
         files = gr.File(file_count='multiple', file_types=['.fits'], label='FITS files (multi-OK)')
@@ -274,26 +273,26 @@ with gr.Blocks(css=css) as app:
     analyze_btn = gr.Button('Analyze + AI Predict', variant='primary', size='lg')
 
     with gr.Row():
-        result_text = gr.Textbox(label='BLS vs AI Comparison', lines=15)
-        result_img = gr.Image(label='Dark Smooth Plots', type='pil')
+        result_text = gr.Textbox(label='BLS and AI Comparison', lines=15)
+        result_img = gr.Image(label='3 Plots', type='pil')
 
     analyze_btn.click(analyze_exoplanet, [files, sde_slider], [result_text, result_img])
 
-    # spravka
-    with gr.Accordion("? СПРАВКА (Выберите термин)", open=False):
+    # справка
+    with gr.Accordion("? HELP (Choose a term)", open=False):
         with gr.Row():
             term_dropdown = gr.Dropdown(
                 choices=list(terms.keys()), 
-                label="Термины", 
+                label="Terms", 
                 value="SDE",
                 elem_id="term_select"
             )
-            search_box = gr.Textbox(
-                label="Поиск", 
+            search_box =gr.Textbox(
+                label="Search", 
                 placeholder="SDE, BLS, depth...",
                 lines=1
             )
-        help_output = gr.Markdown(label="Описание", value="**SDE**: Signal Detection Efficiency...")
+        help_output = gr.Markdown(label="Description", value="**SDE**: Signal Detection Efficiency...")
 
         # query
         term_dropdown.change(show_term, term_dropdown, help_output)
