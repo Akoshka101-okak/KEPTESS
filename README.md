@@ -1,6 +1,6 @@
 ---
-title: Exoplanet Finer
-emoji: 🐠
+title: Exoplanet Finder
+emoji: 🚀
 colorFrom: green
 colorTo: purple
 sdk: gradio
