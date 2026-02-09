@@ -237,7 +237,7 @@ KOI-score: {min(100, (sde/15 + ai_prob/2)/2):.0f}%'''
 
 css = '''
 body { background:linear-gradient(135deg, #0b0c10 0%, #1a1a2e 50%, #16213e 100%); color: #c5c6c7; font-family: 'Segoe UI', sans-serif; }
-h1 { color: #66fcf1;text-align: center; }
+h1 { color: #7fff00; text-align: center; }
 .gr-button { background: linear-gradient(45deg, #1f2833, #45a29e); color: #66fcf1; border-radius: 12px; font-weight: bold; }
 .gr-button:hover { background:linear-gradient(45deg, #45a29e, #66fcf1); color: #0b0c10; }
 .gr-textbox { background: rgba(31,40,51,0.9); border-radius: 12px; border: 1px solid #66fcf1; color: #c5c6c7; }
